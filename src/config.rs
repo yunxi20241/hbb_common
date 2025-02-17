@@ -1967,6 +1967,16 @@ pub struct GroupUser {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct DeviceGroup {
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub name: String,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Group {
     #[serde(
         default,
@@ -1978,6 +1988,8 @@ pub struct Group {
     pub users: Vec<GroupUser>,
     #[serde(default, deserialize_with = "deserialize_vec_grouppeer")]
     pub peers: Vec<GroupPeer>,
+    #[serde(default, deserialize_with = "deserialize_vec_devicegroup")]
+    pub device_groups: Vec<DeviceGroup>,
 }
 
 impl Group {
@@ -2049,6 +2061,7 @@ deserialize_default!(deserialize_vec_abpeer, Vec<AbPeer>);
 deserialize_default!(deserialize_vec_abentry, Vec<AbEntry>);
 deserialize_default!(deserialize_vec_groupuser, Vec<GroupUser>);
 deserialize_default!(deserialize_vec_grouppeer, Vec<GroupPeer>);
+deserialize_default!(deserialize_vec_devicegroup, Vec<DeviceGroup>);
 deserialize_default!(deserialize_keypair, KeyPair);
 deserialize_default!(deserialize_size, Size);
 deserialize_default!(deserialize_hashmap_string_string, HashMap<String, String>);
@@ -2236,6 +2249,7 @@ pub mod keys {
     // buildin options
     pub const OPTION_DISPLAY_NAME: &str = "display-name";
     pub const OPTION_DISABLE_UDP: &str = "disable-udp";
+    pub const OPTION_PRESET_DEVICE_GROUP_NAME: &str = "preset-device-group-name";
     pub const OPTION_PRESET_USERNAME: &str = "preset-user-name";
     pub const OPTION_PRESET_STRATEGY_NAME: &str = "preset-strategy-name";
     pub const OPTION_REMOVE_PRESET_PASSWORD_WARNING: &str = "remove-preset-password-warning";
@@ -2386,6 +2400,7 @@ pub mod keys {
     pub const KEYS_BUILDIN_SETTINGS: &[&str] = &[
         OPTION_DISPLAY_NAME,
         OPTION_DISABLE_UDP,
+        OPTION_PRESET_DEVICE_GROUP_NAME,
         OPTION_PRESET_USERNAME,
         OPTION_PRESET_STRATEGY_NAME,
         OPTION_REMOVE_PRESET_PASSWORD_WARNING,
