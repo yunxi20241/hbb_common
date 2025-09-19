@@ -297,6 +297,8 @@ pub struct PeerConfig {
     #[serde(flatten)]
     pub view_only: ViewOnly,
     #[serde(flatten)]
+    pub show_my_cursor: ShowMyCursor,
+    #[serde(flatten)]
     pub sync_init_clipboard: SyncInitClipboard,
     // Mouse wheel or touchpad scroll mode
     #[serde(
@@ -373,6 +375,7 @@ impl Default for PeerConfig {
             follow_remote_window: Default::default(),
             keyboard_mode: Default::default(),
             view_only: Default::default(),
+            show_my_cursor: Default::default(),
             reverse_mouse_wheel: Self::default_reverse_mouse_wheel(),
             displays_as_individual_windows: Self::default_displays_as_individual_windows(),
             use_all_my_displays_for_the_remote_session:
@@ -1682,6 +1685,13 @@ serde_field_bool!(
 );
 
 serde_field_bool!(
+    ShowMyCursor,
+    "show_my_cursor",
+    default_show_my_cursor,
+    "ShowMyCursor::default_show_my_cursor"
+);
+
+serde_field_bool!(
     SyncInitClipboard,
     "sync-init-clipboard",
     default_sync_init_clipboard,
@@ -2537,6 +2547,7 @@ pub mod keys {
     pub const OPTION_KEEP_SCREEN_ON: &str = "keep-screen-on";
 
     pub const OPTION_DISABLE_GROUP_PANEL: &str = "disable-group-panel";
+    pub const OPTION_DISABLE_DISCOVERY_PANEL: &str = "disable-discovery-panel";
     pub const OPTION_PRE_ELEVATE_SERVICE: &str = "pre-elevate-service";
 
     // proxy settings
@@ -2605,6 +2616,7 @@ pub mod keys {
         OPTION_FLOATING_WINDOW_SVG,
         OPTION_KEEP_SCREEN_ON,
         OPTION_DISABLE_GROUP_PANEL,
+        OPTION_DISABLE_DISCOVERY_PANEL,
         OPTION_PRE_ELEVATE_SERVICE,
         OPTION_ALLOW_REMOTE_CM_MODIFICATION,
         OPTION_ALLOW_AUTO_RECORD_OUTGOING,
