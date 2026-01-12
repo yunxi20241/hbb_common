@@ -1,5 +1,19 @@
 use crate::ResultType;
-use std::{collections::HashMap, process::Command};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    process::Command,
+};
+use users::{get_current_uid, get_user_by_uid, os::unix::UserExt};
+
+use sctk::{
+    output::OutputData,
+    output::{OutputHandler, OutputState},
+    reexports::client::protocol::wl_output::WlOutput,
+    reexports::client::{globals, Proxy},
+    reexports::client::{Connection, QueueHandle},
+    registry::{ProvidesRegistryState, RegistryState},
+};
 
 lazy_static::lazy_static! {
     pub static ref DISTRO: Distro = Distro::new();
@@ -76,6 +90,8 @@ fn find_cmd_path(cmd: &'static str) -> String {
     cmd.to_string()
 }
 
+// Deprecated. Use `hbb_common::platform::linux::is_kde_session()` instead for now.
+// Or we need to set the correct environment variable in the server process.
 #[inline]
 pub fn is_kde() -> bool {
     if let Ok(env) = std::env::var(XDG_CURRENT_DESKTOP) {
@@ -83,6 +99,18 @@ pub fn is_kde() -> bool {
     } else {
         false
     }
+}
+
+// Don't use `hbb_common::platform::linux::is_kde()` here.
+// It's not correct in the server process.
+pub fn is_kde_session() -> bool {
+    std::process::Command::new(CMD_SH.as_str())
+        .arg("-c")
+        .arg("pgrep -f kded[0-9]+")
+        .stdout(std::process::Stdio::piped())
+        .output()
+        .map(|o| !o.stdout.is_empty())
+        .unwrap_or(false)
 }
 
 #[inline]
@@ -337,6 +365,138 @@ pub fn system_message(title: &str, msg: &str, forever: bool) -> ResultType<()> {
     crate::bail!("failed to post system message");
 }
 
+#[derive(Debug, Clone)]
+pub struct WaylandDisplayInfo {
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub logical_size: Option<(i32, i32)>,
+    pub refresh_rate: i32,
+}
+
+// Retrieves information about all connected displays via the Wayland protocol.
+pub fn get_wayland_displays() -> ResultType<Vec<WaylandDisplayInfo>> {
+    struct WaylandEnv {
+        registry_state: RegistryState,
+        output_state: OutputState,
+    }
+
+    impl OutputHandler for WaylandEnv {
+        fn output_state(&mut self) -> &mut OutputState {
+            &mut self.output_state
+        }
+
+        fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: WlOutput) {}
+        fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: WlOutput) {}
+        fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: WlOutput) {}
+    }
+
+    impl ProvidesRegistryState for WaylandEnv {
+        fn registry(&mut self) -> &mut RegistryState {
+            &mut self.registry_state
+        }
+
+        sctk::registry_handlers!();
+    }
+
+    sctk::delegate_output!(WaylandEnv);
+    sctk::delegate_registry!(WaylandEnv);
+
+    let conn = Connection::connect_to_env()?;
+    let (globals, mut event_queue) = globals::registry_queue_init(&conn)?;
+    let queue_handle = event_queue.handle();
+
+    let registry_state = RegistryState::new(&globals);
+    let output_state = OutputState::new(&globals, &queue_handle);
+
+    let mut environment = WaylandEnv {
+        registry_state,
+        output_state,
+    };
+
+    event_queue.roundtrip(&mut environment)?;
+
+    let outputs: Vec<_> = environment.output_state.outputs().collect();
+    let mut display_infos = Vec::new();
+
+    for output in outputs {
+        if let Some(output_data) = output.data::<OutputData>() {
+            output_data.with_output_info(|info| {
+                if let Some(mode) = info.modes.iter().find(|m| m.current) {
+                    let (x, y) = info.location;
+                    let (width, height) = mode.dimensions;
+                    let refresh_rate = mode.refresh_rate;
+                    let name = info.name.clone().unwrap_or_default();
+                    let logical_size = info.logical_size;
+                    display_infos.push(WaylandDisplayInfo {
+                        name,
+                        x,
+                        y,
+                        width,
+                        height,
+                        logical_size,
+                        refresh_rate,
+                    });
+                }
+            });
+        }
+    }
+
+    Ok(display_infos)
+}
+
+/// Escape a string for safe use in shell commands by wrapping in single quotes.
+///
+/// This function handles the edge case of single quotes within the string by:
+/// 1. Ending the current single-quoted section
+/// 2. Adding an escaped single quote
+/// 3. Starting a new single-quoted section
+///
+/// Example: "it's here" -> "'it'\''s here'"
+#[inline]
+pub fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace("'", "'\\''"))
+}
+
+/// Get the current user's home directory via getpwuid (trusted source).
+///
+/// This function uses the system's password database (via `getpwuid`) to retrieve
+/// the home directory, avoiding the security risk of relying on the `HOME`
+/// environment variable which can be manipulated by untrusted input.
+///
+/// # Returns
+/// - `Some(PathBuf)` if the home directory was found and exists
+/// - `None` if the user lookup failed or the directory doesn't exist
+///
+/// # Security
+/// This function is designed to be safe against confused-deputy attacks where
+/// an attacker might manipulate environment variables to influence privileged
+/// operations.
+pub fn get_home_dir_trusted() -> Option<PathBuf> {
+    let uid = get_current_uid();
+    match get_user_by_uid(uid) {
+        Some(user) => {
+            let home = user.home_dir();
+            if Path::is_dir(home) {
+                Some(PathBuf::from(home))
+            } else {
+                log::warn!(
+                    "Home directory for uid {} does not exist or is not a directory: {:?}",
+                    uid,
+                    home
+                );
+                None
+            }
+        }
+        None => {
+            log::warn!("Failed to get user info for uid {}", uid);
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,5 +509,64 @@ mod tests {
             run_cmds_trim_newline("whoami").unwrap() + "\n",
             run_cmds("whoami").unwrap()
         );
+    }
+
+    /// Test get_home_dir_trusted: returns valid path and ignores HOME env var
+    #[test]
+    fn test_get_home_dir_trusted() {
+        let original_home = std::env::var("HOME").ok();
+
+        // Set HOME to a fake/malicious path
+        std::env::set_var("HOME", "/tmp/fake_malicious_home");
+        let result = get_home_dir_trusted();
+
+        // Restore original HOME
+        match original_home {
+            Some(home) => std::env::set_var("HOME", home),
+            None => std::env::remove_var("HOME"),
+        }
+
+        // Verify: returns valid path that is NOT the fake HOME
+        if let Some(path) = result {
+            assert!(path.is_absolute(), "Path should be absolute: {:?}", path);
+            assert!(path.is_dir(), "Path should be a directory: {:?}", path);
+            assert_ne!(
+                path.to_string_lossy(),
+                "/tmp/fake_malicious_home",
+                "Should not use HOME env var"
+            );
+        }
+    }
+
+    /// Test shell_quote with normal strings
+    #[test]
+    fn test_shell_quote_normal() {
+        assert_eq!(shell_quote("hello"), "'hello'");
+        assert_eq!(shell_quote("/home/user"), "'/home/user'");
+    }
+
+    /// Test shell_quote with spaces
+    #[test]
+    fn test_shell_quote_spaces() {
+        assert_eq!(shell_quote("/home/my user/file"), "'/home/my user/file'");
+        assert_eq!(shell_quote("path with spaces"), "'path with spaces'");
+    }
+
+    /// Test shell_quote with single quotes (the tricky case)
+    #[test]
+    fn test_shell_quote_single_quotes() {
+        assert_eq!(shell_quote("it's"), "'it'\\''s'");
+        assert_eq!(shell_quote("don't stop"), "'don'\\''t stop'");
+    }
+
+    /// Test shell_quote with shell metacharacters
+    #[test]
+    fn test_shell_quote_metacharacters() {
+        // These should all be safely quoted
+        assert_eq!(shell_quote("test;rm -rf /"), "'test;rm -rf /'");
+        assert_eq!(shell_quote("$(whoami)"), "'$(whoami)'");
+        assert_eq!(shell_quote("`id`"), "'`id`'");
+        assert_eq!(shell_quote("a && b"), "'a && b'");
+        assert_eq!(shell_quote("a | b"), "'a | b'");
     }
 }
