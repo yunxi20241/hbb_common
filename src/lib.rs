@@ -485,8 +485,26 @@ pub struct VersionCheckRequest {
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct VersionCheckResponse {
-    #[serde(default)]
+    #[serde(default, alias = "html_url")]
     pub url: String,
+}
+
+#[cfg(test)]
+mod version_check_tests {
+    use super::VersionCheckResponse;
+
+    #[test]
+    fn parses_github_release_page_as_update_url() {
+        let response: VersionCheckResponse = serde_json::from_str(
+            r#"{"html_url":"https://github.com/yunxi20241/rustdesk1/releases/tag/1.4.10","tag_name":"1.4.10"}"#,
+        )
+        .expect("valid GitHub release response");
+
+        assert_eq!(
+            response.url,
+            "https://github.com/yunxi20241/rustdesk1/releases/tag/1.4.10"
+        );
+    }
 }
 
 pub const VER_TYPE_RUSTDESK_CLIENT: &str = "rustdesk-client";
