@@ -2773,21 +2773,34 @@ fn is_option_can_save(
 }
 
 #[inline]
+fn build_incoming_only() -> bool {
+    option_env!("RUSTDESK_INCOMING_ONLY").is_some()
+}
+
+#[inline]
+fn build_outgoing_only() -> bool {
+    option_env!("RUSTDESK_OUTGOING_ONLY").is_some()
+}
+
+#[inline]
 pub fn is_incoming_only() -> bool {
-    HARD_SETTINGS
-        .read()
-        .unwrap()
-        .get("conn-type")
-        .map_or(false, |x| x == ("incoming"))
+    !build_outgoing_only()
+        && (build_incoming_only()
+            || HARD_SETTINGS
+                .read()
+                .unwrap()
+                .get("conn-type")
+                .map_or(false, |x| x == ("incoming")))
 }
 
 #[inline]
 pub fn is_outgoing_only() -> bool {
-    HARD_SETTINGS
-        .read()
-        .unwrap()
-        .get("conn-type")
-        .map_or(false, |x| x == ("outgoing"))
+    build_outgoing_only()
+        || HARD_SETTINGS
+            .read()
+            .unwrap()
+            .get("conn-type")
+            .map_or(false, |x| x == ("outgoing"))
 }
 
 #[inline]
@@ -3287,6 +3300,22 @@ impl Status {
 #[cfg(test)]
 mod tests {
     use super::{permanent_password::PERMANENT_PASSWORD_ENC_VERSION, *};
+
+    #[test]
+    fn incoming_only_build_flag_is_detected() {
+        assert_eq!(
+            build_incoming_only(),
+            option_env!("RUSTDESK_INCOMING_ONLY").is_some()
+        );
+    }
+
+    #[test]
+    fn outgoing_only_build_flag_is_detected() {
+        assert_eq!(
+            build_outgoing_only(),
+            option_env!("RUSTDESK_OUTGOING_ONLY").is_some()
+        );
+    }
 
     static CONFIG_STATE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
